@@ -135,7 +135,21 @@
 
     <script>
       // ==========================================
-      // 1. RESOURCES CONFIG Vandiep
+      // 1. SYSTEM CONFIG Vandiep
+      // ==========================================
+      const CONFIG = {
+        goldCount: 2000,
+        redCount: 300,
+        giftCount: 150,
+        explodeRadius: 65,
+        photoOrbitRadius: 25,
+        treeHeight: 70,
+        treeBaseRadius: 35,
+        photoCount: 5, // Số lượng ảnh hiển thị
+      };
+
+      // ==========================================
+      // 2. RESOURCES CONFIG Vandiep
       // ==========================================
       const MUSIC_URL = "./audio.mp3";
       let bgMusic = new Audio(MUSIC_URL);
@@ -143,13 +157,18 @@
       bgMusic.volume = 1.0;
 
       const loader = new THREE.TextureLoader();
-      const photoFiles = [
+      // Tạo danh sách ảnh dựa trên CONFIG.photoCount
+      const basePhotoFiles = [
         "./image1.jpg",
         "./image2.jpg",
         "./image3.jpg",
         "./image4.jpg",
         "./image5.jpg",
       ];
+      const photoFiles = [];
+      for (let i = 0; i < CONFIG.photoCount; i++) {
+        photoFiles.push(basePhotoFiles[i % basePhotoFiles.length]);
+      }
       const photoTextures = [];
       photoFiles.forEach((f, i) => (photoTextures[i] = loader.load(f)));
 
@@ -195,19 +214,6 @@
         gift: createCustomTexture("gift_red"),
       };
 
-      // ==========================================
-      // 2. SYSTEM CONFIG Vandiep
-      // ==========================================
-      const CONFIG = {
-        goldCount: 2000,
-        redCount: 300,
-        giftCount: 150,
-        explodeRadius: 65,
-        photoOrbitRadius: 25,
-        treeHeight: 70,
-        treeBaseRadius: 35,
-      };
-
       let scene, camera, renderer;
       let groupGold, groupRed, groupGift;
       let photoMeshes = [];
@@ -216,6 +222,9 @@
       let state = "TREE"; // TREE, EXPLODE, PHOTO, HEART
       let selectedIndex = 0;
       let handX = 0.5;
+      let lastHandX = 0.5; // Lưu handX cuối cùng khi có tay
+      let noHandTimer = 0; // Timer khi không có tay
+      const NO_HAND_TIMEOUT = 2.0; // 2 giây không có tay mới chuyển về TREE
 
       // ==========================================
       // 3. THREE.JS SYSTEM Vandiep
@@ -365,7 +374,7 @@
         const borderGeo = new THREE.PlaneGeometry(9, 9);
         const borderMat = new THREE.MeshBasicMaterial({ color: 0xffd700 });
 
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < CONFIG.photoCount; i++) {
           const mat = new THREE.MeshBasicMaterial({
             map: photoTextures[i],
             side: THREE.DoubleSide,
@@ -533,7 +542,7 @@
         } else {
           // EXPLODE
           group.scale.set(1, 1, 1);
-          group.rotation.y += (handRotY - group.rotation.y) * 0.1;
+          group.rotation.y += (handRotY - group.rotation.y) * 0.35; // Tăng từ 0.25 lên 0.35 để quay nhanh hơn
 
           // size, color
           for (let i = 0; i < count; i++) {
@@ -555,7 +564,20 @@
         requestAnimationFrame(animate);
         const time = Date.now() * 0.001;
         const speed = 0.08;
-        const handRotY = (handX - 0.5) * 4.0;
+
+        // Tăng timer khi không có tay (được reset trong onResults khi có tay)
+        if (noHandTimer > 0 && noHandTimer < NO_HAND_TIMEOUT) {
+          noHandTimer += 0.016; // ~60fps
+          if (
+            noHandTimer >= NO_HAND_TIMEOUT &&
+            (state === "EXPLODE" || state === "PHOTO")
+          ) {
+            state = "TREE";
+          }
+        }
+
+        // Sử dụng lastHandX để giữ rotation khi tay ra khỏi camera
+        const handRotY = (lastHandX - 0.5) * 10.0; // Tăng từ 7.0 lên 10.0 để quay nhanh hơn
 
         updateParticleGroup(groupGold, "gold", state, speed, handRotY, time);
         updateParticleGroup(groupRed, "red", state, speed, handRotY, time);
@@ -593,7 +615,7 @@
           starMesh.visible = false;
           loveMesh.visible = false;
           const baseAngle = groupGold.rotation.y;
-          const angleStep = (Math.PI * 2) / 5;
+          const angleStep = (Math.PI * 2) / CONFIG.photoCount;
           let bestIdx = 0;
           let maxZ = -999;
           photoMeshes.forEach((mesh, i) => {
@@ -664,6 +686,7 @@
             const distThumb = Math.hypot(h1[4].x - h2[4].x, h1[4].y - h2[4].y);
             if (distIndex < 0.15 && distThumb < 0.15) {
               state = "HEART";
+              noHandTimer = 0; // Reset timer khi có tay
               return;
             }
           }
@@ -671,6 +694,9 @@
           if (results.multiHandLandmarks.length > 0) {
             const lm = results.multiHandLandmarks[0];
             handX = lm[9].x;
+            lastHandX = handX; // Lưu handX cuối cùng
+            noHandTimer = 0; // Reset timer khi có tay
+
             const tips = [8, 12, 16, 20];
             const wrist = lm[0];
             let openDist = 0;
@@ -689,7 +715,14 @@
               state = "EXPLODE";
             }
           } else {
-            state = "TREE";
+            // Không có tay - bắt đầu timer nếu chưa bắt đầu
+            if (
+              noHandTimer === 0 &&
+              (state === "EXPLODE" || state === "PHOTO")
+            ) {
+              noHandTimer = 0.001; // Bắt đầu timer
+            }
+            // Giữ nguyên state và lastHandX, cho phép tiếp tục điều khiển rotation
           }
         });
 
